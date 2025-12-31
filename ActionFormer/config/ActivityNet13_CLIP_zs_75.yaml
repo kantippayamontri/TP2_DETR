@@ -1,0 +1,17 @@
+# basic
+task: "zero_shot"
+# save_result: True
+
+# model
+
+# dataset
+dataset_name: ActivityNet13
+anno_file_path: "../GAP/data/ActivityNet13/ActivityNet13_annotations.json"
+feature_info_path: "../GAP/data/ActivityNet13/CLIP/ActivityNet13_info.json"
+description_file_path: "../GAP/data/ActivityNet13/ActivityNet13_description_v6.json"
+feature_path: "../ActivityNet13/CLIP_feature"
+feature_stride: 16
+feature_type: "CLIP"
+num_classes: 200
+split: 75
+# split_id: 0
