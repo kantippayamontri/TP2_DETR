@@ -136,12 +136,13 @@ best_figures/
 thesis/
 *Zone.Identifier
 datasets/
-Deformable-DETR/
+# Deformable-DETR/
 
 # Temporary files
 *.tmp
 *.temp
 *.bak
+
 
 # Data (uncomment if you want to ignore large datasets)
 # datasets/
