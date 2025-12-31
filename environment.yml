@@ -215,4 +215,3 @@ dependencies:
     - wsproto==1.2.0
     - xmltodict==0.14.2
     - zipp==3.20.2
-prefix: /home/yayun502/anaconda3/envs/gap
