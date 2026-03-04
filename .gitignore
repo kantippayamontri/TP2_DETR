@@ -1,4 +1,6 @@
 # .gitignore
+figures/
+training_output_test_round*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
