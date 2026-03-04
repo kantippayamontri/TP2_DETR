@@ -1047,7 +1047,7 @@ class SetCriterion(nn.Module):
             plt.xlim(0, T-1)
             plt.legend()
             plt.tight_layout()
-            plt.savefig(f'/home/yayun502/GAP/DeformableDETR/figures/Epoch_{epoch}_Video_{bid}.png')
+            plt.savefig(f'./figures/Epoch_{epoch}_Video_{bid}.png')
             plt.close()
     
         

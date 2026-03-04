@@ -1,10 +1,8 @@
-import os.path as osp
-import torch
 import logging
-from eval import tad_eval
-from sklearn.metrics import accuracy_score
-import time
+import os.path as osp
 
+import torch
+from eval import tad_eval
 
 logger = logging.getLogger()
 
@@ -179,14 +177,41 @@ def test_freq(model,
 
 
 if __name__ == "__main__":
-    import options
-    from options import merge_cfg_from_file
-    from utils.util import setup_seed
+    import os
+    import random
+
     import dataset
+    import numpy as np
+    import options
+    from models.deformable_detr import build_model
+    from options import merge_cfg_from_file
     from torch.utils.data import DataLoader
     from utils.misc import collate_fn
-    from models.deformable_detr import build_model
-    import os
+    from utils.util import setup_seed
+
+    def seed_worker(worker_id):
+        # Set different deterministic seed for each worker
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    def build_dataloader(dataset, batch_size=1, shuffle=False, num_workers=0, 
+                         pin_memory=True, drop_last=False, collate_fn=None, seed=42):
+        """Build a reproducible DataLoader with deterministic seed handling."""
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+        
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            drop_last=drop_last,
+            collate_fn=collate_fn,
+            worker_init_fn=seed_worker,
+            generator=generator
+        )
 
     args = options.parser.parse_args()
     if args.cfg_path is not None:
@@ -199,7 +224,7 @@ if __name__ == "__main__":
     # load dataset
     print(f"Loading the dataset...")
     val_dataset = getattr(dataset,args.dataset_name+"Dataset")(subset='inference', mode='inference', args=args)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, num_workers=args.num_workers, pin_memory=True, shuffle=False, drop_last=False)
+    val_loader = build_dataloader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True, drop_last=False, collate_fn=collate_fn, seed=seed)
 
     # load model
     print(f"Building the model...")

@@ -20,13 +20,10 @@ import random
 
 logger = logging.getLogger()
 
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
-
 
 class BaseDataset(Dataset):
     def __init__(self, subset, mode, args, assigned_video_list=None):
-        '''
+        """
         BaseDataset
         Parameters:
             subset: train/val/test, the subset to specific dataset
@@ -41,7 +38,7 @@ class BaseDataset(Dataset):
             split: the proportion of train/inference in classes name
             split_id: the id of split file is used
             # binary: whether to just distinguish foreground and background
-        '''
+        """
 
         super(BaseDataset).__init__()
         self.subset = subset
@@ -59,71 +56,97 @@ class BaseDataset(Dataset):
         self.target_type = args.target_type
 
         self.slice_size = args.slice_size
-        self.slice_overlap = args.slice_overlap if self.mode=="train" else args.inference_slice_overlap
-        self.inference_entire = args.inference_entire if self.mode=="inference" else False 
+        self.slice_overlap = (
+            args.slice_overlap if self.mode == "train" else args.inference_slice_overlap
+        )
+        self.inference_entire = (
+            args.inference_entire if self.mode == "inference" else False
+        )
 
-        self.classes, self.valid_anno_dict, self.valid_video_list, self.anno_dict, self.feature_info, self.src_valid_anno_dict = self._prepare_gt(assigned_video_list)
+        (
+            self.classes,
+            self.valid_anno_dict,
+            self.valid_video_list,
+            self.anno_dict,
+            self.feature_info,
+            self.src_valid_anno_dict,
+        ) = self._prepare_gt(assigned_video_list)
         self.description_dict = self._get_description(self.description_file_path)
-        
-        logger.info(f"The num of valid videos is {len(self.valid_anno_dict)} in subset {subset}, there are {sum([len(v['annotations']) for k,v in self.valid_anno_dict.items()])} instances of {len(self.classes)} classes.")
+
+        logger.info(
+            f"The num of valid videos is {len(self.valid_anno_dict)} in subset {subset}, there are {sum([len(v['annotations']) for k,v in self.valid_anno_dict.items()])} instances of {len(self.classes)} classes."
+        )
 
     def _get_description(self, description_file_path):
         description_dict = json.load(open(description_file_path))
         return description_dict
 
     def _prepare_gt(self, assigned_video_list=None):
-        '''parse annotation file'''
+        """parse annotation file"""
         anno_dict = json.load(open(self.anno_file_path))
         feature_info = json.load(open(self.feature_info_path))
 
         # get classes list
-        if self.task == 'close_set':
-            classes = anno_dict['classes'] # get all class names, without "ambiguous" 
-        elif self.task == 'zero_shot':
-            classes = self._get_classes_for_zero_shot(self.mode,self.split,self.split_id) # implementation in child class
+        if self.task == "close_set":
+            classes = anno_dict["classes"]  # get all class names, without "ambiguous"
+        elif self.task == "zero_shot":
+            classes = self._get_classes_for_zero_shot(
+                self.mode, self.split, self.split_id
+            )  # implementation in child class
         else:
             raise ValueError("Don't define this task_setting.")
 
         # get training labels: valid_anno_dict, a dict that contains the video information; valid_video_list, a list that contain video name
-        valid_anno_dict, valid_video_list, src_valid_anno_dict = self._parse_anno(anno_dict,
-                                                             feature_info,
-                                                             classes,
-                                                             self.subset,
-                                                             self.task,
-                                                             self.feature_stride,
-                                                             self.mode,
-                                                             self.slice_overlap,
-                                                             self.slice_size,
-                                                             assigned_video_list) # implementation in child class
-        
-        return classes,valid_anno_dict,valid_video_list,anno_dict,feature_info,src_valid_anno_dict
+        valid_anno_dict, valid_video_list, src_valid_anno_dict = self._parse_anno(
+            anno_dict,
+            feature_info,
+            classes,
+            self.subset,
+            self.task,
+            self.feature_stride,
+            self.mode,
+            self.slice_overlap,
+            self.slice_size,
+            assigned_video_list,
+        )  # implementation in child class
+
+        return (
+            classes,
+            valid_anno_dict,
+            valid_video_list,
+            anno_dict,
+            feature_info,
+            src_valid_anno_dict,
+        )
 
     def __len__(self):
         return len(self.valid_video_list)
 
-    def _rescale_feature(self,feats):
-        
+    def _rescale_feature(self, feats):
+
         if self.rescale_length == 0:
             return feats
         else:
-            feats = feats.permute(1,0) # [C,T]
+            feats = feats.permute(1, 0)  # [C,T]
             # interpolate
-            feats = F.interpolate(feats.unsqueeze(0),size=self.rescale_length)[0] # [C,self.slice_len]
-            feats = feats.permute(1,0) # [T,C]
+            feats = F.interpolate(feats.unsqueeze(0), size=self.rescale_length)[
+                0
+            ]  # [C,self.slice_len]
+            feats = feats.permute(1, 0)  # [T,C]
             return feats
 
-    def _get_feature(self,video_name, feature_path, feature_type):
-        
+    def _get_feature(self, video_name, feature_path, feature_type):
+
         if feature_type == "CLIP":
-            feat_path = os.path.join(feature_path, video_name+".npy")
+            feat_path = os.path.join(feature_path, video_name + ".npy")
         elif feature_type == "ViFi-CLIP":
             raise NotImplementedError
-        
+
         if os.path.exists(feat_path):
-            video_feat = np.load(feat_path, allow_pickle=True) # T,dim
+            video_feat = np.load(feat_path, allow_pickle=True)  # T,dim
         else:
             raise ValueError(f"Don't exist the feat: {feat_path}")
-        
+
         feature_data = torch.from_numpy(video_feat).float().contiguous()
 
         # re-scale feature to uniform length
@@ -131,149 +154,184 @@ class BaseDataset(Dataset):
 
         return feature
 
-
     def generate_inner_segment_with_eps(self, origin_seg, eps, start_bound, end_bound):
         origin_length = origin_seg[1] - origin_seg[0]
-        
+
         allowed_intersection_length = origin_length * eps
-        
-        new_segment_length = random.uniform(origin_length*0.5, allowed_intersection_length)
-        
-        new_segment_start = random.uniform(origin_seg[0], origin_seg[1] - new_segment_length)
+
+        new_segment_length = random.uniform(
+            origin_length * 0.5, allowed_intersection_length
+        )
+
+        new_segment_start = random.uniform(
+            origin_seg[0], origin_seg[1] - new_segment_length
+        )
         new_segment_end = new_segment_start + new_segment_length
-        
+
         new_segment_start = max(new_segment_start, start_bound)
         new_segment_end = min(new_segment_end, end_bound)
-        
-        assert new_segment_end-new_segment_start>0, f"new_segment_start:{new_segment_start},new_segment_end:{new_segment_end},origin_seg:{origin_seg}"
+
+        assert (
+            new_segment_end - new_segment_start > 0
+        ), f"new_segment_start:{new_segment_start},new_segment_end:{new_segment_end},origin_seg:{origin_seg}"
         new_segment = [new_segment_start, new_segment_end]
         return new_segment
 
-    def generate_outer_segment_with_random_shifted(self, origin_seg, eps, start_bound, end_bound):
+    def generate_outer_segment_with_random_shifted(
+        self, origin_seg, eps, start_bound, end_bound
+    ):
 
         origin_length = origin_seg[1] - origin_seg[0]
         max_offset = origin_length * (1 - eps)
-        
+
         offset = random.uniform(-max_offset, max_offset)
-        
+
         new_segment_start = origin_seg[0] + offset
         new_segment_end = origin_seg[1] + offset
-        
+
         new_segment_start = max(new_segment_start, start_bound)
         new_segment_end = min(new_segment_end, end_bound)
-        
-        assert new_segment_end-new_segment_start>0,  f"new_segment_start:{new_segment_start},new_segment_end:{new_segment_end},origin_seg:{origin_seg}"
+
+        assert (
+            new_segment_end - new_segment_start > 0
+        ), f"new_segment_start:{new_segment_start},new_segment_end:{new_segment_end},origin_seg:{origin_seg}"
         new_segment = [new_segment_start, new_segment_end]
         return new_segment
-    
+
     def _get_train_label(self, video_name, valid_anno_dict, classes, feat_length):
-        
-        '''get normalized target'''
+        """get normalized target"""
         video_anno = valid_anno_dict[video_name]
-        segments_anno = video_anno['annotations']
-        feature_duration  = video_anno['feature_duration']
+        segments_anno = video_anno["annotations"]
+        feature_duration = video_anno["feature_duration"]
         # update the valid_anno_dict by a hook approach
-        self.valid_anno_dict[video_name]['feature_length'] = feat_length
+        self.valid_anno_dict[video_name]["feature_length"] = feat_length
         num_classes = len(self.classes)
- 
+
         target = {
-            'segments': [], 
-            'labels': [], # the category labels for detector
-            'label_names': [],
-            'semantic_labels':[],
-            'semantic_label_names':[],
-            'video_name': video_name,
-            'video_duration': feature_duration,   # only used in inference
-            'salient_mask': [], # the mask to get action instance 
-            'mask_labels':np.full(feat_length,0) # [T]
-            }
-        
+            "segments": [],
+            "labels": [],  # the category labels for detector
+            "label_names": [],
+            "semantic_labels": [],
+            "semantic_label_names": [],
+            "video_name": video_name,
+            "video_duration": feature_duration,  # only used in inference
+            "salient_mask": [],  # the mask to get action instance
+            "mask_labels": np.full(feat_length, 0),  # [T]
+        }
+
         # sort the segments follow time sequence
-        segments_anno = list(sorted(segments_anno, key=lambda x: sum(x['segment'])))
+        segments_anno = list(sorted(segments_anno, key=lambda x: sum(x["segment"])))
         # bg_start = 0
         # bg_end = feature_duration
-        for seg_anno in segments_anno: # a list of dict [{'segment': ,'labels': }, ]
-            
-            segment = seg_anno['segment'] 
+        for seg_anno in segments_anno:  # a list of dict [{'segment': ,'labels': }, ]
+
+            segment = seg_anno["segment"]
 
             # special rule for thumos14, treat ambiguous instances as negatives, although the ambiguous has been dropped in self.parse_gt()
-            if seg_anno['label'] not in classes:
+            if seg_anno["label"] not in classes:
                 continue
 
             if self.target_type != "none":
                 label_id = 0
-                label_name = 'foreground'
+                label_name = "foreground"
             else:
                 # the label id of first forground class is 0
-                label_id = classes.index(seg_anno['label']) # the index come from the classes in anno_file
-                label_name = seg_anno['label']
+                label_id = classes.index(
+                    seg_anno["label"]
+                )  # the index come from the classes in anno_file
+                label_name = seg_anno["label"]
 
-            target['segments'].append(segment)
-            target['labels'].append(label_id)  # the category labels for detector to classify
-            target['label_names'].append(label_name)
+            target["segments"].append(segment)
+            target["labels"].append(
+                label_id
+            )  # the category labels for detector to classify
+            target["label_names"].append(label_name)
 
-            semantic_label = classes.index(seg_anno['label']) # the category labels for semantic classification
-            target['semantic_labels'].append(semantic_label)
-            target['semantic_label_names'].append(seg_anno['label'])
+            semantic_label = classes.index(
+                seg_anno["label"]
+            )  # the category labels for semantic classification
+            target["semantic_labels"].append(semantic_label)
+            target["semantic_label_names"].append(seg_anno["label"])
 
             # add salient mask
-            start_float, end_float = np.array(segment)/feature_duration*feat_length
-            start, end = np.floor(start_float).astype(int), np.ceil(end_float).astype(int)
-            start_idx, end_idx = max(start,0), min(end + 1,feat_length)
-            mask_salient = np.ones(feat_length,dtype=bool) # [feat_length]
+            start_float, end_float = np.array(segment) / feature_duration * feat_length
+            start, end = np.floor(start_float).astype(int), np.ceil(end_float).astype(
+                int
+            )
+            start_idx, end_idx = max(start, 0), min(end + 1, feat_length)
+            mask_salient = np.ones(feat_length, dtype=bool)  # [feat_length]
             mask_salient[start_idx:end_idx] = False
-            target['salient_mask'].append(mask_salient)
-            
+            target["salient_mask"].append(mask_salient)
+
             # update class-agnostic mask labels
-            target['mask_labels'][start_idx:end_idx] = 1
+            target["mask_labels"][start_idx:end_idx] = 1
 
         # normalized the coordinate
-        target['segments'] = np.array(target['segments']) / feature_duration
-        
-        if len(target['segments']) > 0:
-            target['segments'] = segment_t1t2_to_cw(target['segments'])
+        target["segments"] = np.array(target["segments"]) / feature_duration
+
+        if len(target["segments"]) > 0:
+            target["segments"] = segment_t1t2_to_cw(target["segments"])
 
             # convert to torch format
-            for k, dtype in zip(['segments', 'labels'], ['float32', 'int64']):
+            for k, dtype in zip(["segments", "labels"], ["float32", "int64"]):
                 if not isinstance(target[k], torch.Tensor):
                     target[k] = torch.from_numpy(np.array(target[k], dtype=dtype))
-            
+
             # covert 'semantic_labels' to torch format
-            target['semantic_labels'] = torch.from_numpy(np.array(target['semantic_labels'],dtype='int64'))
+            target["semantic_labels"] = torch.from_numpy(
+                np.array(target["semantic_labels"], dtype="int64")
+            )
 
             # covert 'salient_mask' to torch format
-            target['salient_mask'] = torch.from_numpy(np.array(target['salient_mask']))
+            target["salient_mask"] = torch.from_numpy(np.array(target["salient_mask"]))
 
             # covert 'mask_labels' to torch format
-            target['mask_labels'] = torch.from_numpy(target['mask_labels'])
-            
+            target["mask_labels"] = torch.from_numpy(target["mask_labels"])
+
         return target
 
     def __getitem__(self, index):
         video_name = self.valid_video_list[index]
-        video_feat = self._get_feature(video_name, self.feature_path, self.feature_type) # T,dim
-        T,dim = video_feat.shape
-        target = self._get_train_label(video_name, self.valid_anno_dict, self.classes, T)
+        video_feat = self._get_feature(
+            video_name, self.feature_path, self.feature_type
+        )  # T,dim
+        T, dim = video_feat.shape
+        target = self._get_train_label(
+            video_name, self.valid_anno_dict, self.classes, T
+        )
 
         return video_feat, target
 
+
 class Thumos14Dataset(BaseDataset):
     def __init__(self, subset, mode, args, assigned_video_list=None):
-        subset_mapping = {"train":"val","inference":"test"}
-        super(Thumos14Dataset,self).__init__(subset_mapping[subset], mode, args, assigned_video_list)
+        subset_mapping = {"train": "val", "inference": "test"}
+        super(Thumos14Dataset, self).__init__(
+            subset_mapping[subset], mode, args, assigned_video_list
+        )
 
-    def _get_classes_for_zero_shot(self,mode,split,split_id):
+    def _get_classes_for_zero_shot(self, mode, split, split_id):
         if split == 75:
-            split_75_train = [] ## 75:25 split
-            split_75_test = [] ## 75:25 split
+            split_75_train = []  ## 75:25 split
+            split_75_test = []  ## 75:25 split
 
-            with open('../GAP/splits/train_75_test_25/THUMOS14/train/split_' +str(split_id)+ '.list', 'r') as filehandle:
+            with open(
+                "../GAP/splits/train_75_test_25/THUMOS14/train/split_"
+                + str(split_id)
+                + ".list",
+                "r",
+            ) as filehandle:
                 for line in filehandle.readlines():
-                    split_75_train.append(line[:-1]) 
+                    split_75_train.append(line[:-1])
 
-            with open('../GAP/splits/train_75_test_25/THUMOS14/test/split_' +str(split_id)+ '.list', 'r') as filehandle:
+            with open(
+                "../GAP/splits/train_75_test_25/THUMOS14/test/split_"
+                + str(split_id)
+                + ".list",
+                "r",
+            ) as filehandle:
                 for line in filehandle.readlines():
-                    split_75_test.append(line[:-1]) 
+                    split_75_test.append(line[:-1])
 
             if mode == "train":
                 classes = split_75_train
@@ -281,35 +339,50 @@ class Thumos14Dataset(BaseDataset):
                 classes = split_75_test
             else:
                 raise ValueError(f"Don't define this mode: {mode}.")
-            
+
         elif split == 50:
-            split_50_train = [] ## 50:50 split
-            split_50_test = [] ## 50:50 split
+            split_50_train = []  ## 50:50 split
+            split_50_test = []  ## 50:50 split
 
-            with open('../GAP/splits/train_50_test_50/THUMOS14/train/split_' +str(split_id)+ '.list', 'r') as filehandle:
+            with open(
+                "../GAP/splits/train_50_test_50/THUMOS14/train/split_"
+                + str(split_id)
+                + ".list",
+                "r",
+            ) as filehandle:
                 for line in filehandle.readlines():
-                    split_50_train.append(line[:-1]) 
+                    split_50_train.append(line[:-1])
 
-            with open('../GAP/splits/train_50_test_50/THUMOS14/test/split_' +str(split_id)+ '.list', 'r') as filehandle:
+            with open(
+                "../GAP/splits/train_50_test_50/THUMOS14/test/split_"
+                + str(split_id)
+                + ".list",
+                "r",
+            ) as filehandle:
                 for line in filehandle.readlines():
-                    split_50_test.append(line[:-1]) 
-            
+                    split_50_test.append(line[:-1])
+
             if mode == "train":
                 classes = split_50_train
             elif mode == "inference":
                 classes = split_50_test
             else:
                 raise ValueError(f"Don't define this mode: {mode}.")
-            
+
         else:
             raise ValueError(f"Don't have this split: {split}")
 
         return classes
 
-    def get_valid_anno(self, gt_instances, slice, thr=0.75,
-            start_getter=lambda x: x['segment'][0],
-            end_getter=lambda x: x['segment'][1]):
-        '''Perform integrity based instance filtering'''
+    def get_valid_anno(
+        self,
+        gt_instances,
+        slice,
+        thr=0.75,
+        start_getter=lambda x: x["segment"][0],
+        end_getter=lambda x: x["segment"][1],
+    ):
+        """Perform integrity based instance filtering"""
         start, end = slice
         kept_instances = []
         for inst in gt_instances:
@@ -320,63 +393,122 @@ class Thumos14Dataset(BaseDataset):
                 # clamped inst
                 new_start = max(start_getter(inst), start)
                 new_end = min(end_getter(inst), end)
-                integrity = (new_end - new_start) * 1.0 / (end_getter(inst) - start_getter(inst)) # the ratio of (new segment length)/(origin segment length)
-                
+                integrity = (
+                    (new_end - new_start)
+                    * 1.0
+                    / (end_getter(inst) - start_getter(inst))
+                )  # the ratio of (new segment length)/(origin segment length)
+
                 if integrity >= thr:
-                    new_inst = {k:v for k,v in inst.items()}
-                    new_inst['segment'] = [new_start - start, new_end - start]
+                    new_inst = {k: v for k, v in inst.items()}
+                    new_inst["segment"] = [new_start - start, new_end - start]
                     kept_instances.append(new_inst)
         return kept_instances
 
-    def _parse_anno(self,anno_dict,feature_info,classes,subset,task,feature_stride,mode,slice_overlap,slice_size,exclude_videos=None, assigned_video_list=None):
-        src_valid_anno_dict = {} # store the origin video annotations
-        valid_anno_dict = {} # store the video annotations
-        valid_video_list = [] # store the video name
+    def _parse_anno(
+        self,
+        anno_dict,
+        feature_info,
+        classes,
+        subset,
+        task,
+        feature_stride,
+        mode,
+        slice_overlap,
+        slice_size,
+        exclude_videos=None,
+        assigned_video_list=None,
+    ):
+        src_valid_anno_dict = {}  # store the origin video annotations
+        valid_anno_dict = {}  # store the video annotations
+        valid_video_list = []  # store the video name
 
-        anno_data = anno_dict['database']
+        anno_data = anno_dict["database"]
 
         if assigned_video_list != None:
             video_list = assigned_video_list
         else:
-            video_set = set([x for x in anno_data if anno_data[x]['subset'] in subset]) # get the video name that belongs to 'subset'
-            video_set = video_set.intersection(feature_info.keys()) # get the video name belongs both anno_dict and feature_info
-            
-            exclude_videos = ['video_test_0000270', 'video_test_0001292', 'video_test_0001496', 'video_test_0000814', 'video_test_0000504'] # the annotation of 'video_test_0000814' is wrong, emm, segment second larger than video duration
+            # ============================================================================
+            # REPRODUCIBILITY: Deterministic video ordering
+            # ============================================================================
+            # Use sorted() instead of set operations to maintain deterministic order.
+            # Set operations don't guarantee consistent ordering across Python runs,
+            # which can lead to different video processing sequences and affect
+            # model training reproducibility (e.g., batch composition, gradient updates).
+            video_list_candidates = [
+                x for x in anno_data if anno_data[x]["subset"] in subset
+            ]  # get the video name that belongs to 'subset'
+            video_set = sorted(
+                set(video_list_candidates).intersection(feature_info.keys())
+            )  # get the video name belongs both anno_dict and feature_info, sorted for determinism
+
+            exclude_videos = [
+                "video_test_0000270",
+                "video_test_0001292",
+                "video_test_0001496",
+                "video_test_0000814",
+                "video_test_0000504",
+            ]  # the annotation of 'video_test_0000814' is wrong, emm, segment second larger than video duration
             if exclude_videos is not None:
                 assert isinstance(exclude_videos, (list, tuple))
-                video_set = video_set.difference(exclude_videos)
-            
-            video_list = list(sorted(video_set)) # the video name that belongs to 'subset' and not belongs to excude_videos
+                video_set = sorted(
+                    set(video_set).difference(exclude_videos)
+                )  # sorted for deterministic order
+
+            video_list = video_set  # the video name that belongs to 'subset' and not belongs to excude_videos
 
         for video_name in video_list:
             feat_info = feature_info[video_name]
             # number of frames or snippets
-            feature_length = int(feat_info['snippet_length'])   
-            feature_duration = float(feat_info['snippet_duration']) # the second that feature mathched
-            video_fps = float(feat_info['video_fps'])
-            feature_fps = float(video_fps/feature_stride)
+            feature_length = int(feat_info["snippet_length"])
+            feature_duration = float(
+                feat_info["snippet_duration"]
+            )  # the second that feature mathched
+            video_fps = float(feat_info["video_fps"])
+            feature_fps = float(video_fps / feature_stride)
 
-            if task == "close_set": 
+            if task == "close_set":
                 # remove ambiguous instances on THUMOS14
-                annotations = [x for x in anno_data[video_name]['annotations'] if x['label'] != 'Ambiguous'] # discard the segments(instance) that belongs to "Ambiguous"
-                annotations = list(sorted(annotations, key=lambda x: sum(x['segment']))) # sort segment based on the timestamp
+                annotations = [
+                    x
+                    for x in anno_data[video_name]["annotations"]
+                    if x["label"] != "Ambiguous"
+                ]  # discard the segments(instance) that belongs to "Ambiguous"
+                annotations = list(
+                    sorted(annotations, key=lambda x: sum(x["segment"]))
+                )  # sort segment based on the timestamp
             elif task == "zero_shot":
                 # remove ambiguous instances and zero-shot instances on THUMOS14
-                annotations = [x for x in anno_data[video_name]['annotations'] if x['label'] != 'Ambiguous' and x['label'] in classes] # choose the segments(instance) that not belongs to "Ambiguous" and inside classes 
-                annotations = list(sorted(annotations, key=lambda x: sum(x['segment']))) # sort segment based on the timestamp
+                annotations = [
+                    x
+                    for x in anno_data[video_name]["annotations"]
+                    if x["label"] != "Ambiguous" and x["label"] in classes
+                ]  # choose the segments(instance) that not belongs to "Ambiguous" and inside classes
+                annotations = list(
+                    sorted(annotations, key=lambda x: sum(x["segment"]))
+                )  # sort segment based on the timestamp
             else:
                 raise ValueError(f"Don't define this task: {task}")
 
             # because a snippet need stride frames, the fps is 30. it must meet the minimum snippet length
-            valid_annotations = [x for x in annotations if x['segment'][1] - x['segment'][0] > (feature_stride/video_fps)]
-            
+            valid_annotations = [
+                x
+                for x in annotations
+                if x["segment"][1] - x["segment"][0] > (feature_stride / video_fps)
+            ]
 
             if self.inference_entire:
-                if len(valid_annotations) > 0: # avoid the empty annotations (mainly applied for zero-set) 
+                if (
+                    len(valid_annotations) > 0
+                ):  # avoid the empty annotations (mainly applied for zero-set)
                     valid_anno_dict[video_name] = {
-                        'video_name': video_name, 'annotations': valid_annotations, 
-                        'video_fps': video_fps, 'feature_length': feature_length,
-                        'subset': anno_data[video_name]['subset'], 'feature_duration': feature_duration}
+                        "video_name": video_name,
+                        "annotations": valid_annotations,
+                        "video_fps": video_fps,
+                        "feature_length": feature_length,
+                        "subset": anno_data[video_name]["subset"],
+                        "feature_duration": feature_duration,
+                    }
                     valid_video_list.append(video_name)
                     src_valid_anno_dict[video_name] = valid_anno_dict[video_name]
                 else:
@@ -386,112 +518,146 @@ class Thumos14Dataset(BaseDataset):
                 # slice is the index to get feat
                 slide = int(slice_size * (1 - slice_overlap))
                 if feature_length <= slice_size:
-                    slices = [[0,feature_length-1]]
+                    slices = [[0, feature_length - 1]]
                 else:
                     # (length-kernel)/stride + 1
-                    num_complete_slices = math.floor((feature_length-slice_size)/slide) + 1
-                    slices = [[int(i*slide), int((i*slide)+slice_size-1)] for i in range(num_complete_slices)]
+                    num_complete_slices = (
+                        math.floor((feature_length - slice_size) / slide) + 1
+                    )
+                    slices = [
+                        [int(i * slide), int((i * slide) + slice_size - 1)]
+                        for i in range(num_complete_slices)
+                    ]
 
-                    if (num_complete_slices-1)*slide + slice_size < feature_length:
+                    if (num_complete_slices - 1) * slide + slice_size < feature_length:
                         if mode == "inference":
                             # take the last incomplete slice
                             last_slice_start = int(slide * num_complete_slices)
                         else:
                             # move left to get a complete slice.
                             # This is a historical issue. The performance might be better
-                            # if we keep the same rule for training and inference 
+                            # if we keep the same rule for training and inference
                             last_slice_start = max(0, feature_length - slice_size)
-                        slices.append([last_slice_start, feature_length-1])
-                
+                        slices.append([last_slice_start, feature_length - 1])
+
                 for slice in slices:
                     time_slices = [slice[0] / feature_fps, slice[1] / feature_fps]
                     feature_second = time_slices[1] - time_slices[0]
                     # perform integrity-based instance filtering
-                    valid_window_annotations = self.get_valid_anno(valid_annotations, time_slices)
-                    
-                    if mode == "inference" or len(valid_window_annotations) >= 1: # test phrase will add all slices, although it has empty annotation
+                    valid_window_annotations = self.get_valid_anno(
+                        valid_annotations, time_slices
+                    )
+
+                    if (
+                        mode == "inference" or len(valid_window_annotations) >= 1
+                    ):  # test phrase will add all slices, although it has empty annotation
                         # rename the video slice
-                        new_vid_name = video_name + '_window_{}_{}'.format(*slice)
+                        new_vid_name = video_name + "_window_{}_{}".format(*slice)
                         new_vid_info = {
-                            'annotations': valid_window_annotations, 'src_video_name': video_name, 
-                            'video_fps': video_fps, 'feature_fps': feature_fps,
-                            # 'feature_length': slice_size, 
-                            'subset': anno_data[video_name]['subset'], 'feature_duration': feature_second, 'time_offset': time_slices[0]}
+                            "annotations": valid_window_annotations,
+                            "src_video_name": video_name,
+                            "video_fps": video_fps,
+                            "feature_fps": feature_fps,
+                            # 'feature_length': slice_size,
+                            "subset": anno_data[video_name]["subset"],
+                            "feature_duration": feature_second,
+                            "time_offset": time_slices[0],
+                        }
                         valid_anno_dict[new_vid_name] = new_vid_info
                         valid_video_list.append(new_vid_name)
-                
-            
-            # store the origin annotation for evaluate
-            if len(valid_annotations) > 0: # avoid the empty annotations (mainly applied for zero-set) 
-                src_valid_anno_dict[video_name] = {
-                    'video_name': video_name, 'annotations': valid_annotations, 
-                    'video_fps': video_fps, 
-                    # 'feature_length': feature_length,
-                    'subset': anno_data[video_name]['subset'], 'feature_duration': feature_duration}
 
+            # store the origin annotation for evaluate
+            if (
+                len(valid_annotations) > 0
+            ):  # avoid the empty annotations (mainly applied for zero-set)
+                src_valid_anno_dict[video_name] = {
+                    "video_name": video_name,
+                    "annotations": valid_annotations,
+                    "video_fps": video_fps,
+                    # 'feature_length': feature_length,
+                    "subset": anno_data[video_name]["subset"],
+                    "feature_duration": feature_duration,
+                }
+
+        # ============================================================================
+        # REPRODUCIBILITY: Sort video list for deterministic processing order
+        # ============================================================================
+        # Sorting ensures videos are always processed in the same order across runs.
+        # This is critical for reproducibility as it affects:
+        # - DataLoader iteration order (even with shuffle, the base order matters)
+        # - Batch composition when combined with seeded shuffling
+        # - Consistent results when comparing runs with the same seed
+        valid_video_list = sorted(valid_video_list)
 
         return valid_anno_dict, valid_video_list, src_valid_anno_dict
- 
-    def _get_feature(self,video_name, feature_path, feature_type):
-        
+
+    def _get_feature(self, video_name, feature_path, feature_type):
+
         if self.inference_entire:
             if feature_type == "CLIP":
-                feat_path = os.path.join(feature_path, video_name+".npy")
+                feat_path = os.path.join(feature_path, video_name + ".npy")
             elif feature_type == "ViFi-CLIP":
-                feat_path = os.path.join(feature_path, video_name+".npy")
-            
+                feat_path = os.path.join(feature_path, video_name + ".npy")
+
             if os.path.exists(feat_path):
-                video_feat = np.load(feat_path, allow_pickle=True) # T,dim
+                video_feat = np.load(feat_path, allow_pickle=True)  # T,dim
             else:
                 raise ValueError(f"Don't exist the feat: {feat_path}")
-            
-            feature_data = torch.from_numpy(video_feat).float().contiguous() # Txdim
+
+            feature_data = torch.from_numpy(video_feat).float().contiguous()  # Txdim
 
             feature = feature_data
         else:
-            src_video_name = self.valid_anno_dict[video_name]['src_video_name']
+            src_video_name = self.valid_anno_dict[video_name]["src_video_name"]
             if feature_type == "CLIP":
-                feat_path = os.path.join(feature_path, src_video_name+".npy")
+                feat_path = os.path.join(feature_path, src_video_name + ".npy")
             elif feature_type == "ViFi-CLIP":
-                feat_path = os.path.join(feature_path, src_video_name+".npy")
-            
+                feat_path = os.path.join(feature_path, src_video_name + ".npy")
+
             if os.path.exists(feat_path):
-                video_feat = np.load(feat_path, allow_pickle=True) # T,dim
+                video_feat = np.load(feat_path, allow_pickle=True)  # T,dim
             else:
                 raise ValueError(f"Don't exist the feat: {feat_path}")
-            
-            feature_data = torch.from_numpy(video_feat).float().contiguous() # Txdim
 
-            slice_start, slice_end = [int(x) for x in video_name.split('_')[-2:]]
-            assert slice_end  > slice_start
+            feature_data = torch.from_numpy(video_feat).float().contiguous()  # Txdim
+
+            slice_start, slice_end = [int(x) for x in video_name.split("_")[-2:]]
+            assert slice_end > slice_start
             assert slice_start < feature_data.shape[0]
-            feature_data = feature_data[slice_start:slice_end+1,:] # Txdim
+            feature_data = feature_data[slice_start : slice_end + 1, :]  # Txdim
 
             feature = torch.Tensor(feature_data).float().contiguous()
 
         return feature
 
 
-
-
-
 class ActivityNet13Dataset(BaseDataset):
     def __init__(self, subset, mode, args):
-        subset_mapping = {"train":"train","inference":"val"}
-        super(ActivityNet13Dataset,self).__init__(subset_mapping[subset], mode, args)
+        subset_mapping = {"train": "train", "inference": "val"}
+        super(ActivityNet13Dataset, self).__init__(subset_mapping[subset], mode, args)
 
-    def _get_classes_for_zero_shot(self,mode,split,split_id):
+    def _get_classes_for_zero_shot(self, mode, split, split_id):
         if split == 75:
-            split_75_train = [] ## 75:25 split
-            split_75_test = [] ## 75:25 split
+            split_75_train = []  ## 75:25 split
+            split_75_test = []  ## 75:25 split
 
-            with open('../GAP/splits/train_75_test_25/ActivityNet/train/split_' +str(split_id)+ '.list', 'r') as filehandle:
+            with open(
+                "../GAP/splits/train_75_test_25/ActivityNet/train/split_"
+                + str(split_id)
+                + ".list",
+                "r",
+            ) as filehandle:
                 for line in filehandle.readlines():
-                    split_75_train.append(line[:-1]) 
+                    split_75_train.append(line[:-1])
 
-            with open('../GAP/splits/train_75_test_25/ActivityNet/test/split_' +str(split_id)+ '.list', 'r') as filehandle:
+            with open(
+                "../GAP/splits/train_75_test_25/ActivityNet/test/split_"
+                + str(split_id)
+                + ".list",
+                "r",
+            ) as filehandle:
                 for line in filehandle.readlines():
-                    split_75_test.append(line[:-1]) 
+                    split_75_test.append(line[:-1])
 
             if mode == "train":
                 classes = split_75_train
@@ -499,79 +665,140 @@ class ActivityNet13Dataset(BaseDataset):
                 classes = split_75_test
             else:
                 raise ValueError(f"Don't define this mode: {mode}.")
-            
+
         elif split == 50:
-            split_50_train = [] ## 50:50 split
-            split_50_test = [] ## 50:50 split
+            split_50_train = []  ## 50:50 split
+            split_50_test = []  ## 50:50 split
 
-            with open('../GAP/splits/train_50_test_50/ActivityNet/train/split_' +str(split_id)+ '.list', 'r') as filehandle:
+            with open(
+                "../GAP/splits/train_50_test_50/ActivityNet/train/split_"
+                + str(split_id)
+                + ".list",
+                "r",
+            ) as filehandle:
                 for line in filehandle.readlines():
-                    split_50_train.append(line[:-1]) 
+                    split_50_train.append(line[:-1])
 
-            with open('../GAP/splits/train_50_test_50/ActivityNet/test/split_' +str(split_id)+ '.list', 'r') as filehandle:
+            with open(
+                "../GAP/splits/train_50_test_50/ActivityNet/test/split_"
+                + str(split_id)
+                + ".list",
+                "r",
+            ) as filehandle:
                 for line in filehandle.readlines():
-                    split_50_test.append(line[:-1]) 
-            
+                    split_50_test.append(line[:-1])
+
             if mode == "train":
                 classes = split_50_train
             elif mode == "inference":
                 classes = split_50_test
             else:
                 raise ValueError(f"Don't define this mode: {mode}.")
-            
+
         else:
             raise ValueError(f"Don't have this split: {split}")
 
         return classes
 
-    def _parse_anno(self,anno_dict,feature_info,classes,subset,task,feature_stride,mode,slice_overlap=None,slice_size=None,exclude_videos=None):
-        valid_anno_dict = {} # stor the video annotations
-        valid_video_list = [] # store the video name
+    def _parse_anno(
+        self,
+        anno_dict,
+        feature_info,
+        classes,
+        subset,
+        task,
+        feature_stride,
+        mode,
+        slice_overlap=None,
+        slice_size=None,
+        exclude_videos=None,
+    ):
+        valid_anno_dict = {}  # stor the video annotations
+        valid_video_list = []  # store the video name
 
-        anno_data = anno_dict['database']
+        anno_data = anno_dict["database"]
 
-        video_set = set([x for x in anno_data if anno_data[x]['subset'] in subset]) # get the video name that belongs to 'subset'
-        video_set = video_set.intersection(feature_info.keys()) # get the video name belongs both anno_dict and feature_info
-        
+        # ============================================================================
+        # REPRODUCIBILITY: Deterministic video ordering
+        # ============================================================================
+        # Use sorted() instead of set operations to maintain deterministic order.
+        # Set operations don't guarantee consistent ordering across Python runs,
+        # which can lead to different video processing sequences and affect
+        # model training reproducibility (e.g., batch composition, gradient updates).
+        video_list_candidates = [
+            x for x in anno_data if anno_data[x]["subset"] in subset
+        ]  # get the video name that belongs to 'subset'
+        video_set = sorted(
+            set(video_list_candidates).intersection(feature_info.keys())
+        )  # get the video name belongs both anno_dict and feature_info, sorted for determinism
+
         if exclude_videos is not None:
             assert isinstance(exclude_videos, (list, tuple))
-            video_set = video_set.difference(exclude_videos)
-        
-        video_list = list(sorted(video_set)) # the video name that belongs to 'subset' and not belongs to excude_videos
+            video_set = sorted(
+                set(video_set).difference(exclude_videos)
+            )  # sorted for deterministic order
+
+        video_list = video_set  # the video name that belongs to 'subset' and not belongs to excude_videos
 
         for video_name in video_list:
             feat_info = feature_info[video_name]
             # number of frames or snippets
-            feature_length = int(feat_info['snippet_length'])   
-            feature_duration = float(feat_info['snippet_duration']) # the second that feature mathched
-            video_fps = float(feat_info['video_fps'])
+            feature_length = int(feat_info["snippet_length"])
+            feature_duration = float(
+                feat_info["snippet_duration"]
+            )  # the second that feature mathched
+            video_fps = float(feat_info["video_fps"])
 
-            if task == "close_set": 
-                annotations = [x for x in anno_data[video_name]['annotations']] # discard the segments(instance) that belongs to "Ambiguous"
-                annotations = list(sorted(annotations, key=lambda x: sum(x['segment']))) # sort segment based on the timestamp
+            if task == "close_set":
+                annotations = [
+                    x for x in anno_data[video_name]["annotations"]
+                ]  # discard the segments(instance) that belongs to "Ambiguous"
+                annotations = list(
+                    sorted(annotations, key=lambda x: sum(x["segment"]))
+                )  # sort segment based on the timestamp
             elif task == "zero_shot":
                 # remove ambiguous instances and zero-shot instances on THUMOS14
-                annotations = [x for x in anno_data[video_name]['annotations'] if x['label'] in classes] # choose the segments(instance) that inside classes 
-                annotations = list(sorted(annotations, key=lambda x: sum(x['segment']))) # sort segment based on the timestamp
+                annotations = [
+                    x
+                    for x in anno_data[video_name]["annotations"]
+                    if x["label"] in classes
+                ]  # choose the segments(instance) that inside classes
+                annotations = list(
+                    sorted(annotations, key=lambda x: sum(x["segment"]))
+                )  # sort segment based on the timestamp
             else:
                 raise ValueError(f"Don't define this task: {task}")
 
-            # Remove incorrect annotions on ActivityNet (0.02 duration). Beside, because a snippet need 16 frames, the fps is 30. it must meet the minimum snippet length
-            # valid_annotations = [x for x in annotations if x['segment'][1] - x['segment'][0] > (feature_stride/video_fps) and x['segment'][1] - x['segment'][0] > 0.02]
-            # valid_annotations = [x for x in annotations if x['segment'][1] - x['segment'][0] > 0.02]
-            valid_annotations = [x for x in annotations if x['segment'][1] - x['segment'][0] > 1]
-
+            # Remove incorrect annotations on ActivityNet (minimum 1 second duration)
+            valid_annotations = [
+                x for x in annotations if x["segment"][1] - x["segment"][0] > 1
+            ]
 
             # fliter zero instance video
-            if len(valid_annotations) > 0: # avoid the empty annotations (mainly applied for zero-set) 
-                
+            if (
+                len(valid_annotations) > 0
+            ):  # avoid the empty annotations (mainly applied for zero-set)
+
                 valid_anno_dict[video_name] = {
-                    'video_name': video_name, 'annotations': valid_annotations, 
-                    'video_fps': video_fps, 'feature_length': feature_length,
-                    'subset': anno_data[video_name]['subset'], 'feature_duration': feature_duration}
+                    "video_name": video_name,
+                    "annotations": valid_annotations,
+                    "video_fps": video_fps,
+                    "feature_length": feature_length,
+                    "subset": anno_data[video_name]["subset"],
+                    "feature_duration": feature_duration,
+                }
                 valid_video_list.append(video_name)
             else:
                 continue
-        
-        return valid_anno_dict, valid_video_list, None
 
+        # ============================================================================
+        # REPRODUCIBILITY: Sort video list for deterministic processing order
+        # ============================================================================
+        # Sorting ensures videos are always processed in the same order across runs.
+        # This is critical for reproducibility as it affects:
+        # - DataLoader iteration order (even with shuffle, the base order matters)
+        # - Batch composition when combined with seeded shuffling
+        # - Consistent results when comparing runs with the same seed
+        valid_video_list = sorted(valid_video_list)
+
+        return valid_anno_dict, valid_video_list, None
