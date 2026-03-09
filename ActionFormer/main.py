@@ -558,6 +558,25 @@ if __name__ == "__main__":
                     )
                     update_best_figures()
 
+                    # Save best model checkpoint
+                    checkpoint_path = os.path.join(
+                        "./ckpt/",
+                        args.dataset_name,
+                        f"{args.model_name}_split{args.split_id}_best.pth",
+                    )
+                    torch.save(
+                        {
+                            "epoch": epoch,
+                            "model_state_dict": model.state_dict(),
+                            "optimizer_state_dict": optimizer.state_dict(),
+                            "lr_scheduler_state_dict": lr_scheduler.state_dict(),
+                            "best_stats": best_stats,
+                            "args": args,
+                        },
+                        checkpoint_path,
+                    )
+                    logger.info(f"Saved best model checkpoint to {checkpoint_path}")
+
                 logger.info(
                     "Current best metric from {:.4f}@epoch{}".format(
                         best_stats["mAP_raw"] * 100, best_stats["epoch"]
@@ -585,3 +604,22 @@ if __name__ == "__main__":
             best_stats["AUC_raw"] * 100,
         )
     )
+
+    # Save final model checkpoint
+    final_checkpoint_path = os.path.join(
+        "./ckpt/",
+        args.dataset_name,
+        f"{args.model_name}_split{args.split_id}_final.pth",
+    )
+    torch.save(
+        {
+            "epoch": args.epochs - 1,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "lr_scheduler_state_dict": lr_scheduler.state_dict(),
+            "best_stats": best_stats,
+            "args": args,
+        },
+        final_checkpoint_path,
+    )
+    logger.info(f"Saved final model checkpoint to {final_checkpoint_path}")
