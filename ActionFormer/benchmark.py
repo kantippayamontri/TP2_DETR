@@ -9,7 +9,12 @@ This script measures:
 - Throughput
 
 Usage:
+    python benchmark.py --cfg_path config.yaml --resume checkpoint.pth [options]
     python benchmark.py --cfg_path config.yaml --resume checkpoint.pkl [options]
+
+Checkpoint formats supported:
+    - .pth: New format with model_state_dict, optimizer_state_dict, etc.
+    - .pkl: Legacy format with direct state dict
 """
 
 import argparse
@@ -54,7 +59,10 @@ def get_benchmark_arg_parser():
         help="Number of warm-up iterations to ignore (default: 5)",
     )
     parser.add_argument(
-        "--resume", type=str, required=True, help="Path to checkpoint file (.pkl)"
+        "--resume",
+        type=str,
+        required=True,
+        help="Path to checkpoint file (.pth or .pkl)",
     )
     parser.add_argument(
         "--output_file",
@@ -310,7 +318,19 @@ def main():
 
     print(f"\nLoading checkpoint: {args.resume}...")
     checkpoint = torch.load(args.resume, map_location="cpu")
-    model.load_state_dict(checkpoint)
+
+    # Handle different checkpoint formats
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        # New format (.pth): dictionary with model_state_dict, optimizer_state_dict, etc.
+        model.load_state_dict(checkpoint["model_state_dict"])
+        print(f"  Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
+        if "best_stats" in checkpoint:
+            best_mAP = checkpoint["best_stats"].get("mAP_raw", 0.0) * 100
+            print(f"  Best mAP: {best_mAP:.2f}%")
+    else:
+        # Old format (.pkl): direct state dict
+        model.load_state_dict(checkpoint)
+
     model.to(device)
     model.eval()
 
